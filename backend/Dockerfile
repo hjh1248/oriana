@@ -6,7 +6,7 @@ COPY . .
 RUN ./gradlew bootJar -x test
 
 # 2. 실행 환경 (가벼운 Java)
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jdk-jammy
 WORKDIR /app
 # 빌드된 jar 파일만 가져오기
 COPY --from=builder /app/build/libs/*.jar app.jar
