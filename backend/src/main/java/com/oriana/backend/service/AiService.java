@@ -25,8 +25,8 @@ public class AiService {
 
     private final ObjectMapper objectMapper;
 
-    // Gemini 1.5 Flash 모델 사용 (빠르고 무료 티어 있음)
-    private static final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+    // Gemini 1.5 Flash 모델 사용
+    private static final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
     public AiResponseDto analyzeImage(MultipartFile imageFile) {
         try {
@@ -35,7 +35,7 @@ public class AiService {
 
             // 2. 프롬프트 준비 (JSON으로 달라고 강력 요청)
             String promptText = """
-                너는 '수학/과학 선생님'이야. 이 오답 이미지를 분석해줘.
+                너는 '수학 선생님'이야. 이 오답 이미지를 분석해줘.
                 
                 1. 문제 원문 텍스트 (수식은 LaTeX)
                 2. 핵심 개념 (한 문단)
