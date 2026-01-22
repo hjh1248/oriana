@@ -38,3 +38,6 @@ out/
 
 # Secret Env file
 .env
+
+# DB 데이터 폴더 제외
+backend/pgdata/
