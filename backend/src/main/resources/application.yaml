@@ -17,3 +17,7 @@ spring:
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Seoul
+
+  gemini:
+    api:
+      key: ${GEMINI_API_KEY}
