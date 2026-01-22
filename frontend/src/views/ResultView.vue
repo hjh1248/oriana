@@ -90,22 +90,39 @@ const toggleSimilar = () => {
 const formatText = (text) => {
   if (!text) return '';
 
-  // (1) LaTeX 수식 변환: $수식$ 패턴을 찾아서 KaTeX로 변환
-  let renderedText = text.replace(/\$([^$]+)\$/g, (match, formula) => {
+  let renderedText = text;
+
+  // 1. AI가 보내주는 다양한 수식 괄호를 통일시키기 ($$ 또는 $)
+  // \[ ... \] -> $$ ... $$ (블록 수식)
+  renderedText = renderedText.replace(/\\\[(.*?)\\\]/g, '$$$1$$');
+  // \( ... \) -> $ ... $ (인라인 수식)
+  renderedText = renderedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
+
+  // 2. 블록 수식 ($$ ... $$) 처리 -> displayMode: true (가운데 정렬, 크게)
+  renderedText = renderedText.replace(/\$\$([^$]+)\$\$/g, (match, formula) => {
     try {
-      return katex.renderToString(formula, { throwOnError: false });
+      return katex.renderToString(formula, { displayMode: true, throwOnError: false });
     } catch (e) {
-      return match; 
+      return match;
     }
   });
 
-  // 👇👇 [추가된 부분] 👇👇
-  // (2) 마크다운 굵게 처리: **글자** -> <b>글자</b>
-  renderedText = renderedText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-  // 👆👆 [여기까지 추가] 👆👆
+  // 3. 인라인 수식 ($ ... $) 처리 -> displayMode: false (글자 속에 쏙)
+  renderedText = renderedText.replace(/\$([^$]+)\$/g, (match, formula) => {
+    try {
+      return katex.renderToString(formula, { displayMode: false, throwOnError: false });
+    } catch (e) {
+      return match;
+    }
+  });
 
-  // (3) 줄바꿈 처리 (\n -> <br>)
-  return renderedText.replace(/\n/g, '<br>');
+  // 4. 마크다운 굵게 처리 (**글자** -> <b>글자</b>)
+  renderedText = renderedText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+  // 5. 줄바꿈 처리 (\n -> <br>)
+  renderedText = renderedText.replace(/\n/g, '<br>');
+
+  return renderedText;
 };
 
 const goHome = () => {

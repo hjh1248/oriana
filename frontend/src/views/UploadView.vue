@@ -50,10 +50,10 @@ const analyze = async () => {
     formData.append('image', file.value); // API 요구사항: key는 'image'
 
     // 2. 백엔드로 요청 보내기
-    const response = await axios.post('http://localhost:8080/api/wrong-answers/analyze', formData, {
+    const response = await axios.post('/api/wrong-answers/analyze', formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+        'Content-Type': 'multipart/form-data'
+      }
     });
 
     console.log("분석 결과 도착!", response.data);
