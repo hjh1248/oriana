@@ -1,13 +1,13 @@
-# Build Stage
-FROM gradle:8-jdk17-alpine AS builder
-WORKDIR /build
-COPY . .
-RUN ./gradlew build -x test --parallel
-
-# Run Stage
-FROM openjdk:17-jdk-alpine
+# 1. 빌드 환경 (Gradle)
+FROM gradle:8-jdk17 AS builder
 WORKDIR /app
-COPY --from=builder /build/build/libs/*-SNAPSHOT.jar app.jar
+COPY . .
+# 테스트 제외하고 빌드 (시간/메모리 절약)
+RUN ./gradlew bootJar -x test
 
-EXPOSE 8080
+# 2. 실행 환경 (가벼운 Java)
+FROM openjdk:17-jdk-slim
+WORKDIR /app
+# 빌드된 jar 파일만 가져오기
+COPY --from=builder /app/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

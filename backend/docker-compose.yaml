@@ -24,3 +24,36 @@ services:
       - "5050:80"
     depends_on:
       - db
+  # 3. 백엔드 (Spring Boot) - 추가됨!
+  backend:
+    build: ./backend  # backend 폴더의 Dockerfile을 찾아라
+    container_name: oriana-backend
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/oriana_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    depends_on:
+      - db
+    networks:
+      - oriana-net
+
+  # 4. 프론트엔드 (Vue + Nginx) - 추가됨!
+  frontend:
+    build: ./frontend # frontend 폴더의 Dockerfile을 찾아라
+    container_name: oriana-frontend
+    ports:
+      - "80:80"   # 웹 브라우저 접속용 (HTTP)
+    depends_on:
+      - backend
+    networks:
+      - oriana-net
+
+volumes:
+  db_data:
+
+networks:
+  oriana-net:
+    driver: bridge
