@@ -1,0 +1,26 @@
+services:
+  # 1. PostgreSQL DB 컨테이너
+  db:
+    image: postgres:15
+    container_name: oriana-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME}        # .env에서 가져옴
+      POSTGRES_USER: ${DB_USER}      # .env에서 가져옴
+      POSTGRES_PASSWORD: ${DB_PASSWORD} # .env에서 가져옴
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data # 데이터 영구 저장
+    restart: always
+
+  # 2(옵션) pgAdmin - DB 눈으로 보고 싶을 때 유용함
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: hackathon-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "5050:80"
+    depends_on:
+      - db

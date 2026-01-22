@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update # 해커톤에선 create나 update가 속도 내기 좋음!
+    properties:
+      hibernate:
+        format_sql: true # 쿼리 예쁘게 보기
+    show-sql: true # 실행되는 쿼리 로그로 확인
+
+  # (선택) JSON 날짜 포맷 통일
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Seoul
