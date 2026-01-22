@@ -2,6 +2,9 @@
 FROM gradle:8-jdk17 AS builder
 WORKDIR /app
 COPY . .
+
+# gradlew에 실행 권한 부여하기
+RUN chmod +x ./gradlew
 # 테스트 제외하고 빌드 (시간/메모리 절약)
 RUN ./gradlew bootJar -x test
 
