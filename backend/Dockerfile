@@ -1,5 +1,5 @@
 # 1. 빌드 환경 (Gradle)
-FROM eclipse-temurin:17-jdk-alpine AS builder
+FROM gradle:8-jdk17 AS builder
 WORKDIR /app
 COPY . .
 

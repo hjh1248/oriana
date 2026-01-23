@@ -22,10 +22,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # ★ 중요: 백엔드도 .env에 적힌 이름(DB_USER) 그대로 가져와야 함!
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/oriana_db
-      SPRING_DATASOURCE_USERNAME: ${DB_USER}     # 고침 (POSTGRES_USER -> DB_USER)
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD} # 고침 (POSTGRES_PASSWORD -> DB_PASSWORD)
+      DB_HOST: db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
     depends_on:
       - db
