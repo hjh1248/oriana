@@ -32,9 +32,9 @@ public class User {
     private int points = 0; // 현재 보유 포인트
 
     @Column(name = "next_level_points", nullable = false)
-    @ColumnDefault("500")
+    @ColumnDefault("10")
     @Builder.Default
-    private int nextLevelPoints = 500; // 다음 레벨업에 필요한 포인트
+    private int nextLevelPoints = 10; // 다음 레벨업에 필요한 포인트
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -44,7 +44,7 @@ public class User {
         this.points += earnedPoints;
         if (this.points >= this.nextLevelPoints) {
             this.level += 1;
-            this.nextLevelPoints += 500; // 레벨업 시 다음 기준치 증가
+            this.nextLevelPoints += this.level*10; // 레벨업 시 다음 기준치 증가
         }
     }
 
