@@ -1,19 +1,36 @@
 <template>
-  <div class="app-container">
-    <header class="header">
-      <h1 @click="$router.push('/')" style="cursor: pointer">Oriana 🐤</h1>
-      <p>AI 기반 오답 즉시 학습 시스템</p>
+  <div id="app">
+    <header class="app-header">
+      <div class="logo" @click="$router.push('/')">📚 오리아나</div>
+      
+      <div class="user-info" @click="$router.push('/mypage')" title="마이페이지로 이동">
+        <span class="level-badge">Lv.{{ store.state.user.level }}</span>
+        <span class="username">{{ store.state.user.name }}</span>
+        <span class="points">⭐ {{ store.state.user.points }} P</span>
+        <span class="mypage-icon">👤</span> </div>
     </header>
 
-    <RouterView /> 
+    <main class="content">
+      <router-view />
+    </main>
   </div>
 </template>
 
+<script setup>
+import { store } from './stores/dataStore';
+</script>
+
 <style>
-/* 전역 스타일 */
-body { margin: 0; background-color: #f4f6f8; font-family: 'Noto Sans KR', sans-serif; color: #2c3e50; }
-.app-container { max-width: 600px; margin: 0 auto; padding: 20px; }
-.header { text-align: center; margin-bottom: 30px; }
-.header h1 { margin: 0; color: #42b883; }
-.header p { color: #7f8c8d; font-size: 0.9rem; }
+/* 기존 스타일에서 user-info 부분만 클릭 가능하게 수정 */
+.app-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.logo { font-weight: bold; font-size: 1.2rem; cursor: pointer; color: #42b883; }
+
+/* ✨ 클릭 효과 추가 */
+.user-info { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 500; cursor: pointer; padding: 4px 8px; border-radius: 8px; transition: background 0.2s; }
+.user-info:hover { background: #f5f5f5; }
+
+.level-badge { background: #2c3e50; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; }
+.points { color: #f39c12; font-weight: bold; }
+.mypage-icon { font-size: 1.1rem; margin-left: 4px; }
+.content { padding-bottom: 40px; }
 </style>

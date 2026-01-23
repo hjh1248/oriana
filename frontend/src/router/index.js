@@ -1,25 +1,31 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router';
+import HomeView from '../views/HomeView.vue';
+import UploadView from '../views/UploadView.vue';
 
-// 1. 우리가 만든 페이지(View)들을 가져오는 부분
-import UploadView from '../views/UploadView.vue'
-import ResultView from '../views/ResultView.vue'
+// 새로 만든 4인방 컴포넌트 불러오기
+import RecommendView from '../views/RecommendView.vue';
+import RecommendedView from '../views/RecommendedView.vue';
+import SolveView from '../views/SolveView.vue';
+import SimilarListView from '../views/SimilarListView.vue';
+
+import MyPageView from '../views/MyPageView.vue';
+
+const routes = [
+  { path: '/', name: 'home', component: HomeView },
+  { path: '/upload', name: 'upload', component: UploadView },
+  
+  // 맞춤 추천 관련 라우터 추가
+  { path: '/recommend', name: 'recommend', component: RecommendView }, // 조건 설정
+  { path: '/recommended', name: 'recommended', component: RecommendedView }, // 추천 목록
+  { path: '/solve', name: 'solve', component: SolveView }, // 문제 풀이 (?id=xxx)
+  { path: '/similar-list', name: 'similar-list', component: SimilarListView }, // 유사 문제 목록 (?baseId=xxx)
+
+  { path: '/mypage', name: 'mypage', component: MyPageView },
+];
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
-  routes: [
-    {
-      // 첫 화면 (주소가 '/' 일 때) -> 업로드 페이지 보여주기
-      path: '/',
-      name: 'upload',
-      component: UploadView
-    },
-    {
-      // 결과 화면 (주소가 '/result' 일 때) -> 결과 페이지 보여주기
-      path: '/result',
-      name: 'result',
-      component: ResultView
-    }
-  ]
-})
+  history: createWebHistory(),
+  routes,
+});
 
-export default router
+export default router;
