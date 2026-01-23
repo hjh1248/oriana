@@ -125,7 +125,7 @@ const gradesList = Object.keys(curriculumData);
 
 const prefs = ref({ 
   grade: '중1', 
-  subject: '수학(상)', 
+  subject: '수학', 
   unit: '소인수분해', 
   difficulty: '중', 
   type: '혼합' 
