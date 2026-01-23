@@ -148,7 +148,6 @@ public class AiService {
                   "solution": "친절하고 상세한 풀이 과정",
                   "isSubjective": false
                 },
-                // ... (나머지 2개도 동일한 구조이므로 생략하지 않고 3개를 다 적음)
                 {
                   "grade": "고1",
                   "subject": "수학", 
