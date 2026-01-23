@@ -17,7 +17,20 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue';
 import { store } from './stores/dataStore';
+import api from './api';
+
+onMounted(async () => {
+  try {
+    // 백엔드에서 1번 유저의 상세 정보를 가져옴
+    const response = await api.get('/users/1'); 
+    // 가져온 데이터를 스토어에 저장 (반응형이라 마이페이지에도 즉시 반영됨)
+    store.setUser(response.data); 
+  } catch (error) {
+    console.error("유저 정보를 불러오지 못했습니다:", error);
+  }
+});
 </script>
 
 <style>

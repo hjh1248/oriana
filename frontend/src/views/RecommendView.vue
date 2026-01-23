@@ -65,6 +65,9 @@ import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { store } from '../stores/dataStore';
 
+// ✨ 1. 방금 설정한 axios(api.js) 불러오기
+import api from '../api'; 
+
 const router = useRouter();
 
 // ✨ 대한민국 교육과정 완벽 반영! (중1 ~ 고3, 국수사과영)
@@ -118,10 +121,8 @@ const curriculumData = {
   }
 };
 
-// 학년 리스트 추출
 const gradesList = Object.keys(curriculumData);
 
-// 초기 선택 상태 (기본값)
 const prefs = ref({ 
   grade: '고1', 
   subject: '수학(상)', 
@@ -132,7 +133,6 @@ const prefs = ref({
 
 const isLoading = ref(false);
 
-// ✨ 2. computed를 이용해 학년/과목에 따른 하위 목록 자동 생성
 const availableSubjects = computed(() => {
   return prefs.value.grade ? Object.keys(curriculumData[prefs.value.grade]) : [];
 });
@@ -141,37 +141,38 @@ const availableUnits = computed(() => {
   if (prefs.value.grade && prefs.value.subject && curriculumData[prefs.value.grade][prefs.value.subject]) {
     return curriculumData[prefs.value.grade][prefs.value.subject];
   }
-  return [];
+  return [];  
 });
 
-// ✨ 3. 이벤트 핸들러: 상위 카테고리가 바뀌면 하위 선택값을 자동으로 첫 번째로 리셋
 const onGradeChange = () => {
-  prefs.value.subject = availableSubjects.value[0]; // 해당 학년의 첫 과목 선택
-  onSubjectChange(); // 과목이 바뀌었으니 단원도 리셋
+  prefs.value.subject = availableSubjects.value[0];
+  onSubjectChange();
 };
 
 const onSubjectChange = () => {
-  prefs.value.unit = availableUnits.value[0]; // 해당 과목의 첫 단원('전체 범위') 선택
+  prefs.value.unit = availableUnits.value[0];
 };
 
-
-// API 요청 로직 (기존과 동일, subject 데이터가 추가됨)
+// ✨ 2. 대망의 진짜 API 요청 로직으로 변경!
 const requestAIProblems = async () => {
   isLoading.value = true;
   
   try {
-    // 백엔드 요청 데이터: { grade, subject, unit, difficulty, type }
-    await new Promise(resolve => setTimeout(resolve, 1500)); 
+    // 백엔드로 POST 요청 (우리가 정한 /api/problems/recommend 주소)
+    // prefs.value에 담긴 { grade, subject, unit, difficulty, type }가 자동으로 JSON으로 날아감!
+    const response = await api.post('/problems/recommend', prefs.value); 
 
-    store.state.recommendedList = [
-      { id: 101, grade: prefs.value.grade, subject: prefs.value.subject, tags: [prefs.value.unit, '객관식'], difficulty: prefs.value.difficulty, question: `${prefs.value.unit} 관련 문제입니다. $x^2 - 4x + 3 = 0$ 의 해는?`, options: ['$x=1, 3$', '$x=-1, -3$', '$x=1, 2$', '$x=-1, 3$'], answer: '$x=1, 3$', solution: '인수분해하면 $(x-1)(x-3)=0$ 입니다.', points: 20, isSubjective: false },
-      { id: 102, grade: prefs.value.grade, subject: prefs.value.subject, tags: [prefs.value.unit, '주관식'], difficulty: prefs.value.difficulty, question: `이 문제도 ${prefs.value.subject}의 문제네요! $2x = 8$일 때 $x$의 값은?`, options: [], answer: '4', solution: '양변을 2로 나누면 4입니다.', points: 20, isSubjective: true }
-    ];
+    // ✨ 3. 백엔드에서 생성된 진짜 AI 문제 데이터를 스토어에 저장
+    store.state.recommendedList = response.data;
 
+    store.addProblemsToCache(response.data);
+
+    // 목록 페이지로 이동
     router.push('/recommended');
 
   } catch (error) {
-    alert("문제를 생성하는 도중 오류가 발생했어.");
+    console.error("AI 문제 생성 실패:", error);
+    alert("AI 선생님이 문제를 만드는 도중 오류가 발생했어. 서버가 켜져 있는지 확인해 줘!");
   } finally {
     isLoading.value = false;
   }

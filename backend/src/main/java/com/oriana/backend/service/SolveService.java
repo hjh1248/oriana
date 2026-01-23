@@ -11,6 +11,9 @@ import com.oriana.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.oriana.backend.dto.HistoryResponseDto;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,7 +33,10 @@ public class SolveService {
         // 1. 유저의 답과 실제 정답 비교 (공백 제거 후 비교해서 억울하게 틀리는 일 방지!)
         String cleanUserAns = request.getUserAnswer().replaceAll("\\s+", "");
         String cleanRealAns = problem.getAnswer().replaceAll("\\s+", "");
+        System.out.println(cleanUserAns);
+        System.out.println(cleanRealAns);
         boolean isCorrect = cleanUserAns.equalsIgnoreCase(cleanRealAns);
+        System.out.println(isCorrect);
 
         // 2. 이 유저가 이 문제를 푼 적이 있는지 확인 (없으면 새로 생성)
         SolveHistory history = solveHistoryRepository.findByUserIdAndProblemId(user.getId(), problem.getId())
@@ -70,5 +76,15 @@ public class SolveService {
                 .totalPoints(user.getPoints())
                 .currentLevel(user.getLevel())
                 .build();
+    }
+    @Transactional(readOnly = true)
+    public List<HistoryResponseDto> getUserHistory(Long userId) {
+        // Repository에서 최신순으로 가져옴
+        List<SolveHistory> histories = solveHistoryRepository.findByUserIdOrderBySolvedAtDesc(userId);
+
+        // 프론트엔드가 먹기 좋게 DTO로 변환해서 리턴!
+        return histories.stream()
+                .map(HistoryResponseDto::from)
+                .collect(Collectors.toList());
     }
 }

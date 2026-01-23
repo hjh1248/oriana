@@ -1,14 +1,10 @@
 import { reactive } from 'vue';
 
 export const store = {
+  // 1. 상태 (데이터) 영역
   state: reactive({
     // 유저 정보
-    user: {
-      name: '오리아나',
-      level: 3,
-      points: 450,
-      nextLevelPoints: 500,
-    },
+    user: { id: 1, name: '', level: 0, points: 0, nextLevelPoints: 0 },
 
     // 사진 찍어 푼 문제 데이터 (기존)
     resultData: null,
@@ -18,7 +14,15 @@ export const store = {
 
     // 여태까지 불러온 모든 문제 캐싱 (SolveView에서 ID로 검색할 때 사용)
     allProblems: [], 
-  }),
+  }), 
+  // ✨ 여기서 state 괄호가 끝남!
+
+  // 2. 함수 (메서드) 영역
+
+  // [신규] 유저 정보 업데이트 함수 (위치를 밖으로 뺐어!)
+  setUser(userData) {
+    this.state.user = { ...this.state.user, ...userData };
+  },
 
   // [기존] 사진 찍어 푼 결과 저장
   setAnalysisResult(previewUrl, data) {

@@ -43,18 +43,21 @@ import 'katex/dist/katex.min.css';
 
 const router = useRouter();
 
-// 스토어에서 추천 문제 목록 가져오기
+// ✨ 1. 스토어에서 데이터 가져오기 (방금 RecommendView가 API로 받아온 진짜 데이터!)
 const problems = computed(() => store.state.recommendedList || []);
 
 const goToSolve = (id) => {
-  // 풀이 페이지로 이동하면서 어떤 문제인지 id를 넘겨줌!
+  // ✨ 2. 문제 풀기 페이지로 이동! 
+  // (이때 넘어가는 id는 DB에서 생성된 진짜 ID, 예: 105)
   router.push({ path: '/solve', query: { id } });
 };
 
 // 수식 렌더링 함수 (미리보기용)
 const formatText = (text) => {
   if (!text) return '';
-  let rendered = text.replace(/\$\$([^$]+)\$\$/g, (m, f) => katex.renderToString(f, { throwOnError: false }));
+  // ✨ 3. 백엔드에서 내려주는 '\n' 줄바꿈을 HTML <br>로 변환해주는 센스!
+  let rendered = text.replace(/\n/g, '<br/>');
+  rendered = rendered.replace(/\$\$([^$]+)\$\$/g, (m, f) => katex.renderToString(f, { throwOnError: false }));
   rendered = rendered.replace(/\$([^$]+)\$/g, (m, f) => katex.renderToString(f, { throwOnError: false }));
   return rendered;
 };

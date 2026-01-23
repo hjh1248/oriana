@@ -35,33 +35,41 @@
     </section>
 
     <section class="history-section">
-      <div class="tabs">
-        <button :class="{ active: activeTab === 'wrong' }" @click="activeTab = 'wrong'">📝 오답노트</button>
-        <button :class="{ active: activeTab === 'bookmark' }" @click="activeTab = 'bookmark'">⭐ 북마크</button>
-        <button :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">📸 스캔 기록</button>
+      <div v-if="isLoading" class="empty-state">
+        기록을 불러오는 중입니다... ⏳
       </div>
 
-      <div class="tab-content">
-        <div v-if="filteredList.length === 0" class="empty-state">
-          아직 기록이 없어요. 문제를 더 풀고 와볼까요?
+      <div v-else>
+        <div class="tabs">
+          <button :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">📝 풀이 기록</button>
+          <button :class="{ active: activeTab === 'bookmark' }" @click="activeTab = 'bookmark'">⭐ 북마크</button>
+          <button :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">📸 스캔 기록</button>
         </div>
 
-        <div v-else class="problem-list">
-          <div 
-            v-for="prob in filteredList" 
-            :key="prob.id" 
-            class="prob-card"
-          >
-            <div class="card-header">
-              <span class="tag date-tag">{{ prob.date }}</span>
-              <span class="tag subject-tag">{{ prob.subject }}</span>
-              <span :class="['tag diff-tag', prob.difficulty]">{{ prob.difficulty }}</span>
-            </div>
-            <p class="prob-preview" v-html="formatText(prob.question)"></p>
-            
-            <div class="card-footer">
-              <span class="wrong-badge" v-if="activeTab === 'wrong'">❌ 틀렸던 문제</span>
-              <button class="retry-btn" @click="goToSolve(prob.id)">다시 풀기 🔄</button>
+        <div class="tab-content">
+          <div v-if="filteredList.length === 0" class="empty-state">
+            아직 기록이 없어요. 문제를 더 풀고 와볼까요?
+          </div>
+
+          <div v-else class="problem-list">
+            <div 
+              v-for="prob in filteredList" 
+              :key="prob.id" 
+              class="prob-card"
+            >
+              <div class="card-header">
+                <span class="tag date-tag">{{ prob.date }}</span>
+                <span class="tag subject-tag">{{ prob.subject }}</span>
+                <span :class="['tag diff-tag', prob.difficulty]">{{ prob.difficulty }}</span>
+              </div>
+              <p class="prob-preview" v-html="formatText(prob.question)"></p>
+              
+              <div class="card-footer">
+                <span class="correct-badge" v-if="prob.isCorrect">⭕ 정답</span>
+                <span class="wrong-badge" v-else>❌ 오답</span>
+                
+                <button class="retry-btn" @click="goToSolve(prob.id)">다시 풀기 🔄</button>
+              </div>
             </div>
           </div>
         </div>
@@ -72,50 +80,120 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { store } from '../stores/dataStore';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
+// 백엔드 통신용 axios 불러오기
+import api from '../api'; 
+
 const router = useRouter();
 
-// 탭 상태 관리
-const activeTab = ref('wrong'); // 기본값: 오답노트
+// 💡 기본 탭 상태를 '전체(all)'로 변경
+const activeTab = ref('all'); 
+const myHistory = ref([]);
+const isLoading = ref(true);
+
+// 스토어에서 유저 ID 가져오기
+const CURRENT_USER_ID = computed(() => store.state.user.id);
 
 // 프로그레스 바 계산
 const progressPercent = computed(() => {
   const current = store.state.user.points;
   const target = store.state.user.nextLevelPoints;
+  if (!target) return 0; // 방어 코드
   return Math.min((current / target) * 100, 100);
 });
 
-// 📌 [더미 데이터] 실제로는 DB에서 유저의 기록을 가져와야 해!
-const myHistory = ref([
-  { id: 901, type: 'wrong', date: '2023.10.27', subject: '수학', difficulty: '상', question: '다음 방정식 $x^3 - 1 = 0$의 허근을 $\\omega$라 할 때...', answer: '-1' },
-  { id: 902, type: 'wrong', date: '2023.10.26', subject: '수학', difficulty: '중', question: '직선 $y = 2x+3$과 수직인 직선의 기울기는?', answer: '-0.5' },
-  { id: 903, type: 'bookmark', date: '2023.10.25', subject: '수학', difficulty: '상', question: '매우 중요한 모의고사 기출문제입니다. 꼭 다시 풀어보세요.', answer: '42' },
-  { id: 904, type: 'scan', date: '2023.10.24', subject: '수학', difficulty: '중', question: '스마트폰으로 직접 촬영한 문제입니다.', answer: '1' }
-]);
-
-// 선택된 탭에 따라 리스트 필터링
-const filteredList = computed(() => {
-  return myHistory.value.filter(prob => prob.type === activeTab.value);
+// ✨ 컴포넌트 마운트 시 데이터 로딩 (병렬 처리로 속도 최적화)
+onMounted(async () => {
+  isLoading.value = true;
+  try {
+    await Promise.all([
+      fetchUserProfile(),
+      fetchMyHistory()
+    ]);
+  } catch (error) {
+    console.error("데이터 로딩 에러:", error);
+  } finally {
+    isLoading.value = false;
+  }
 });
 
-// 라우터 이동 함수
+// 유저 정보 가져오기
+const fetchUserProfile = async () => {
+  try {
+    const response = await api.get(`/users/${CURRENT_USER_ID.value}`);
+    store.setUser(response.data); 
+  } catch (error) {
+    console.error("유저 정보를 불러오는 데 실패했어:", error);
+  }
+};
+
+// 풀이 기록 가져오기
+const fetchMyHistory = async () => {
+  if (!CURRENT_USER_ID.value) return;
+
+  try {
+    const response = await api.get('/solve/history', {
+      params: { userId: CURRENT_USER_ID.value } 
+    });
+
+    myHistory.value = response.data.map(history => {
+      const dateStr = new Date(history.solvedAt).toLocaleDateString();
+      
+      return {
+        id: history.problem.id, 
+        originalHistoryId: history.id,
+        date: dateStr,
+        // 백엔드에서 correct/isCorrect 둘 다 대응
+        isCorrect: history.isCorrect !== undefined ? history.isCorrect : history.correct,
+        sourceType: history.problem.sourceType,
+        subject: history.problem.subject,
+        difficulty: history.problem.difficulty,
+        question: history.problem.question,
+        rawProblem: history.problem 
+      };
+    });
+  } catch (error) {
+    console.error("히스토리 로딩 에러:", error);
+  }
+};
+
+// ✨ 탭에 따른 데이터 필터링
+const filteredList = computed(() => {
+  if (activeTab.value === 'all') {
+    // 풀이 기록: 모든 히스토리 반환
+    return myHistory.value; 
+  } else if (activeTab.value === 'scan') {
+    // 스캔 기록: 사진으로 찍은 문제만
+    return myHistory.value.filter(prob => prob.sourceType === 'PHOTO');
+  } else if (activeTab.value === 'bookmark') {
+    // 북마크: 정답인 문제 (임시 로직)
+    return myHistory.value.filter(prob => prob.isCorrect); 
+  }
+  return [];
+});
+
 const goToRecommend = () => router.push('/recommend');
+
 const goToSolve = (id) => {
-  // 캐시에 넣어두고 풀이 화면으로 이동 (실제론 DB에서 가져옴)
   const target = myHistory.value.find(p => p.id === id);
-  store.addProblemsToCache([target]); 
+  if (target) {
+    store.addProblemsToCache([target.rawProblem]); 
+  }
   router.push({ path: '/solve', query: { id } });
 };
 
 // 수식 렌더링 함수
 const formatText = (text) => {
   if (!text) return '';
-  return text.replace(/\$([^$]+)\$/g, (m, f) => katex.renderToString(f, { throwOnError: false }));
+  let rendered = text.replace(/\n/g, '<br/>');
+  rendered = rendered.replace(/\$\$([^$]+)\$\$/g, (m, f) => katex.renderToString(f, { displayMode: true, throwOnError: false }));
+  rendered = rendered.replace(/\$([^$]+)\$/g, (m, f) => katex.renderToString(f, { displayMode: false, throwOnError: false }));
+  return rendered;
 };
 </script>
 
@@ -163,7 +241,12 @@ const formatText = (text) => {
 
 /* 카드 하단부 */
 .card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #eee; padding-top: 12px; }
-.wrong-badge { font-size: 0.8rem; font-weight: bold; color: #e74c3c; }
+
+/* ✨ 신규: 정답 뱃지 (초록색) */
+.correct-badge { font-size: 0.85rem; font-weight: bold; color: #42b883; } 
+/* 기존: 오답 뱃지 (빨간색) */
+.wrong-badge { font-size: 0.85rem; font-weight: bold; color: #e74c3c; }
+
 .retry-btn { padding: 8px 16px; background: #42b883; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.85rem; }
 .retry-btn:hover { background: #3aa873; }
 </style>

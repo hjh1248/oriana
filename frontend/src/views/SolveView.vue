@@ -90,6 +90,9 @@ import { store } from '../stores/dataStore';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
+// ✨ 1. 백엔드 통신용 axios 불러오기
+import api from '../api'; 
+
 const route = useRoute();
 const router = useRouter();
 
@@ -101,70 +104,93 @@ const isCorrect = ref(false);
 const showAnswer = ref(false);
 const showSolution = ref(false);
 
-// ✨ 포인트 어뷰징 방지: 이미 포인트를 받았는지 체크하는 변수
 const hasRewarded = ref(false);
-// 몇 번째 시도인지 카운트 (옵션)
-const attemptCount = ref(0); 
 
-onMounted(() => {
+// 💡 임시 유저 ID (로그인 기능이 없으므로 일단 1번 유저로 고정!)
+const CURRENT_USER_ID = 1; 
+
+onMounted(async () => {
   const probId = parseInt(route.query.id);
+  
+  // 1. 먼저 스토어(캐시)에서 찾아본다
   let foundProblem = store.getProblemById(probId); 
 
+  // 2. 만약 스토어에 없다면? (새로고침 등) 백엔드에서 직접 가져온다!
   if (!foundProblem) {
-    foundProblem = {
-      id: probId || 999,
-      grade: '고1',
-      subject: '수학',
-      tags: ['더미문제', '다항식'],
-      difficulty: '중',
-      question: '다음 다항식 $P(x) = x^2 - 4x + 4$을 인수분해 하시오. (더미 데이터)',
-      options: ['$(x+2)^2$', '$(x-2)^2$', '$(x+4)^2$', '$(x-4)^2$'],
-      answer: '$(x-2)^2$',
-      solution: '완전제곱식 $(a-b)^2 = a^2 - 2ab + b^2$을 이용하면 **$(x-2)^2$**이 됩니다.',
-      points: 15,
-      isSubjective: false,
-    };
-    store.addProblemsToCache([foundProblem]);
+    try {
+      // 💡 백엔드에 단건 조회 API가 있어야 함! (아래에서 설명)
+      const response = await api.get(`/problems/${probId}`);
+      foundProblem = response.data;
+      
+      // 가져온 데이터는 나중을 위해 다시 스토어 캐시에 넣어주는 센스
+      store.addProblemsToCache([foundProblem]);
+    } catch (error) {
+      console.error("문제 로딩 실패:", error);
+      alert("존재하지 않거나 삭제된 문제야!");
+      router.push('/');
+      return;
+    }
   }
 
   problem.value = foundProblem;
 });
 
-// ✨ 사용자가 다른 보기를 누르면, 다시 제출할 수 있도록 결과창을 잠시 숨김
+// 사용자가 다른 보기를 누르면, 제출 상태를 초기화
 const selectOption = (opt) => {
   userAnswer.value = opt;
   isSubmitted.value = false; 
 };
 
-const submitAnswer = () => {
+// ✨ 2. 대망의 '진짜 API 채점' 로직
+const submitAnswer = async () => {
   if (!userAnswer.value) return;
   
-  attemptCount.value++; // 시도 횟수 증가
+  // 버튼 중복 클릭 방지
   isSubmitted.value = true;
   
-  const cleanUserAns = userAnswer.value.replace(/\s+/g, '');
-  const cleanRealAns = problem.value.answer.replace(/\s+/g, '');
+  try {
+    // 백엔드로 유저가 적은 답안 전송 (POST /api/solve)
+    const response = await api.post('/solve', {
+      userId: CURRENT_USER_ID,
+      problemId: problem.value.id,
+      userAnswer: userAnswer.value
+    });
 
-  if (cleanUserAns === cleanRealAns) {
-    isCorrect.value = true;
+    const result = response.data; // 백엔드가 준 채점 결과(SolveResponseDto)
     
-    // ✨ 첫 번째 시도일 때만 포인트 지급!
-    if (attemptCount.value === 1) {
-      store.addPoints(problem.value.points);
+    console.log('📊 백엔드 채점 결과:', result); // 디버깅용 로그
+
+    // 1. 정답 여부 업데이트 (백엔드는 'correct' 필드를 사용!)
+    isCorrect.value = result.correct;
+
+    // 2. 정답이고, 첫 시도라서 보상을 받았다면? (백엔드는 'rewarded' 필드를 사용!)
+    if (result.correct && result.rewarded) {
       hasRewarded.value = true;
+      
+      // ✨ 3. 스토어의 유저 포인트와 레벨을 백엔드 최신 데이터로 동기화!
+      store.state.user.points = result.totalPoints;
+      store.state.user.level = result.currentLevel;
+    } else {
+      hasRewarded.value = false;
     }
-  } else {
-    isCorrect.value = false;
+
+  } catch (error) {
+    console.error("채점 중 오류 발생:", error);
+    alert("채점 서버에 연결할 수 없어. 잠시 후 다시 시도해줘!");
+    isSubmitted.value = false; // 에러 시 다시 풀 수 있게 버튼 활성화
   }
 };
 
 const goToSimilarList = () => {
+  // 유사 문제 리스트 뷰로 이동
   router.push({ path: '/similar-list', query: { baseId: problem.value.id } });
 };
 
+// 수식 렌더링 함수
 const formatText = (text) => {
   if (!text) return '';
-  let rendered = text.replace(/\$\$([^$]+)\$\$/g, (m, f) => katex.renderToString(f, { displayMode: true, throwOnError: false }));
+  let rendered = text.replace(/\n/g, '<br/>');
+  rendered = rendered.replace(/\$\$([^$]+)\$\$/g, (m, f) => katex.renderToString(f, { displayMode: true, throwOnError: false }));
   rendered = rendered.replace(/\$([^$]+)\$/g, (m, f) => katex.renderToString(f, { displayMode: false, throwOnError: false }));
   return rendered;
 };

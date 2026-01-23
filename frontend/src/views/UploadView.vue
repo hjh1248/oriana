@@ -51,6 +51,9 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { store } from '../stores/dataStore';
 
+// ✨ 1. api.js (Axios) 불러오기
+import api from '../api';
+
 const router = useRouter();
 const file = ref(null);
 const preview = ref(null);
@@ -64,40 +67,37 @@ const handleFile = (e) => {
   }
 };
 
+// ✨ 2. 진짜 사진 분석 API 연동!
 const analyze = async () => {
   if (!file.value) return;
 
   loading.value = true;
 
   try {
-    // 1. 가짜 지연 시간 (AI가 사진을 텍스트로 바꾸는 척)
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // 파일을 담을 FormData 캡슐 생성 (파일 전송의 핵심!)
+    const formData = new FormData();
+    formData.append('file', file.value); // 백엔드의 @RequestParam("file")과 이름 일치
 
-    // 2. 백엔드에서 사진을 읽어서 '우리의 표준 문제 양식'으로 돌려준 데이터
-    const convertedProblem = {
-      id: Date.now(),
-      grade: '고1', 
-      subject: '수학',
-      tags: ['사진분석', '방정식'], // 사진으로 찍은 문제 태그
-      difficulty: '중',
-      // 사진 속 글자를 AI가 마크다운과 수식($$)으로 완벽하게 변환함
-      question: '이차방정식 $x^2 - 3x + 2 = 0$ 의 두 근의 곱을 구하시오. (사진에서 변환됨)',
-      options: ['-1', '1', '2', '3'], 
-      answer: '2',
-      solution: '근과 계수의 관계 $c/a$를 이용하면 $2/1 = 2$가 됩니다.',
-      points: 20, // 직접 찍은 문제를 풀면 보너스 포인트!
-      isSubjective: false,
-    };
+    // 백엔드로 POST 요청 (사진 전송)
+    const response = await api.post('/problems/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data' // "나 파일 보낸다!" 라고 서버에 알려줌
+      }
+    });
 
-    // 3. 변환된 문제를 스토어 캐시에 저장 (SolveView가 찾을 수 있게)
-    store.addProblemsToCache([convertedProblem]);
+    // ✨ 3. 백엔드가 변환해준 문제 리스트 받기 
+    // (이미지를 인식한 원본 문제 + AI가 추가로 만들어준 변형 문제까지 포함된 배열)
+    const newProblems = response.data; 
 
-    // 4. 'SolveView'로 이동!! (단일 뷰 생태계)
-    router.push({ path: '/solve', query: { id: convertedProblem.id } });
+    // 4. 스토어 캐시에 저장
+    store.addProblemsToCache(newProblems);
+
+    // 5. 받아온 문제 중 '첫 번째 문제(원본)'의 풀이 화면으로 바로 이동!
+    router.push({ path: '/solve', query: { id: newProblems[0].id } });
 
   } catch (error) {
-    console.error("에러 발생:", error);
-    alert("문제를 분석하는 도중 오류가 생겼어요, 다시 시도해주세요!");
+    console.error("사진 분석 에러:", error);
+    alert("오리아나가 사진을 분석하는 도중 오류가 발생했어. 사진이 너무 흐리진 않은지 확인해 줘!");
   } finally {
     loading.value = false;
   }
