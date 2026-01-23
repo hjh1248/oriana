@@ -3,7 +3,7 @@
     
     <div v-if="loading" class="loading-box">
       <div class="spinner"></div>
-      <p>오리아나가 문제를 꼼꼼히 분석하고 있어... 🧐</p>
+      <p>오리아나가 문제를 꼼꼼히 분석하고 있어요... 🧐</p>
     </div>
 
     <div v-else class="upload-card">
@@ -67,7 +67,7 @@ const analyze = async () => {
 
   } catch (error) {
     console.error("에러 발생:", error);
-    alert("문제를 분석하는 도중 오류가 생겼어 ㅠㅠ 다시 시도해줘!");
+    alert("문제를 분석하는 도중 오류가 생겼어요, 다시 시도해주세요!");
   } finally {
     loading.value = false;
   }
