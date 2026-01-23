@@ -30,17 +30,17 @@ public class Problem {
     @Column(name = "source_type", nullable = false, length = 20)
     private ProblemSource sourceType;
 
-    @Column(length = 20)
+    @Column(length = 255)
     private String grade; // 예: 고1
 
-    @Column(length = 50)
+    @Column(length = 255)
     private String subject; // 예: 수학(상)
 
     @Type(JsonType.class)
     @Column(columnDefinition = "jsonb")
     private List<String> tags; // 예: ["다항식", "인수분해"]
 
-    @Column(length = 10)
+    @Column(length = 255)
     private String difficulty; // 상, 중, 하
 
     @Column(columnDefinition = "TEXT", nullable = false)
@@ -50,8 +50,8 @@ public class Problem {
     @Column(columnDefinition = "jsonb")
     private List<String> options; // 객관식 보기 리스트
 
-    @Column(length = 50, nullable = false)
-    private String answer; // 정답
+    @Column(columnDefinition = "TEXT", nullable = false)
+    private String answer;
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String solution; // 풀이
