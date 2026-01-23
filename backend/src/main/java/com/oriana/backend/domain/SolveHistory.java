@@ -46,4 +46,8 @@ public class SolveHistory {
     protected void onCreate() {
         this.solvedAt = LocalDateTime.now();
     }
+
+    public void markAsCorrect() {
+        this.isCorrect = true;
+    }
 }
