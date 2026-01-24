@@ -17,8 +17,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -134,13 +132,7 @@ public class AiService {
         json = json.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "");
 
         // 2. JSON 문자열 값 내부의 줄바꿈을 공백으로 변경
-        // "question": "이것은
-        // 두 줄입니다" -> "question": "이것은 두 줄입니다"
         json = fixMultilineStrings(json);
-
-        // 3. 잘못된 이스케이프 시퀀스 수정
-        // \" 뒤에 바로 문자가 오는 경우 등
-        json = fixEscapeSequences(json);
 
         return json;
     }
@@ -189,31 +181,6 @@ public class AiService {
     }
 
     /**
-     * 이스케이프 시퀀스 수정
-     */
-    private String fixEscapeSequences(String json) {
-        // 문자열 값 내부의 따옴표가 이스케이프되지 않은 경우 수정
-        // 정규식으로 "key": "value "with" quotes" 패턴 찾기
-        Pattern pattern = Pattern.compile("\"(question|solution|answer|options)\"\\s*:\\s*\"([^\"]*?)\"");
-        Matcher matcher = pattern.matcher(json);
-
-        StringBuffer sb = new StringBuffer();
-        while (matcher.find()) {
-            String key = matcher.group(1);
-            String value = matcher.group(2);
-
-            // 값 내부의 이스케이프되지 않은 따옴표 처리
-            // 이미 \"로 이스케이프된 것은 보존
-            String fixedValue = value.replaceAll("(?<!\\\\)\"", "\\\\\"");
-
-            matcher.appendReplacement(sb, "\"" + key + "\": \"" + fixedValue + "\"");
-        }
-        matcher.appendTail(sb);
-
-        return sb.toString();
-    }
-
-    /**
      * 최후의 수단: 공격적인 JSON 복구
      */
     private String aggressiveJsonRecovery(String json) {
@@ -222,28 +189,25 @@ public class AiService {
         // 1. 모든 연속된 공백을 하나로
         json = json.replaceAll("\\s+", " ");
 
-        // 2. 문자열 값 내부의 따옴표를 모두 작은따옴표로 변경
-        json = replaceQuotesInStringValues(json);
-
-        // 3. 잘못된 trailing comma 제거
+        // 2. 잘못된 trailing comma 제거
         json = json.replaceAll(",\\s*([}\\]])", "$1");
+
+        // 3. 문자열 값 내 이스케이프되지 않은 따옴표 처리
+        json = escapeUnescapedQuotes(json);
 
         return json;
     }
 
     /**
-     * 문자열 값 내부의 따옴표를 작은따옴표로 변경
+     * 문자열 값 내부의 이스케이프되지 않은 따옴표 처리
      */
-    private String replaceQuotesInStringValues(String json) {
+    private String escapeUnescapedQuotes(String json) {
         StringBuilder result = new StringBuilder();
         boolean inString = false;
-        boolean inKey = false;
         boolean escaped = false;
 
         for (int i = 0; i < json.length(); i++) {
             char c = json.charAt(i);
-            char prev = i > 0 ? json.charAt(i - 1) : ' ';
-            char next = i < json.length() - 1 ? json.charAt(i + 1) : ' ';
 
             if (escaped) {
                 result.append(c);
@@ -258,26 +222,22 @@ public class AiService {
             }
 
             if (c == '"') {
-                // 키-값 구분: "key": 다음 따옴표는 값 시작
-                if (!inString && next == ':') {
-                    inKey = true;
-                    result.append(c);
+                // JSON 키나 값의 시작/끝을 판단
+                if (!inString) {
+                    // 문자열 시작
                     inString = true;
-                } else if (!inString && prev == ':') {
-                    inKey = false;
                     result.append(c);
-                    inString = true;
-                } else if (inString && !inKey) {
-                    // 값 내부의 따옴표는 작은따옴표로
-                    if (next != ',' && next != '}' && next != ']') {
-                        result.append('\'');
-                    } else {
-                        result.append(c);
-                        inString = false;
-                    }
                 } else {
-                    result.append(c);
-                    inString = !inString;
+                    // 다음 문자를 보고 문자열 끝인지 판단
+                    char next = (i < json.length() - 1) ? json.charAt(i + 1) : ' ';
+                    if (next == ',' || next == '}' || next == ']' || next == ':' || Character.isWhitespace(next)) {
+                        // 문자열 끝
+                        inString = false;
+                        result.append(c);
+                    } else {
+                        // 문자열 중간의 따옴표 -> 작은따옴표로 변경
+                        result.append('\'');
+                    }
                 }
                 continue;
             }
@@ -301,6 +261,10 @@ public class AiService {
             2. 모든 문자열 값은 한 줄로 작성 (줄바꿈 금지)
             3. 문자열 내부의 따옴표는 작은따옴표(')로 대체
             4. LaTeX 수식: 인라인 모드만 사용 ($...$), 백슬래시 1개 (\\frac)
+            5. 필드 길이 제한을 엄수하세요:
+               - grade, subject, difficulty: 각 20자 이내
+               - answer: 100자 이내
+               - tags 배열의 각 항목: 20자 이내
             
             [조건]
             - 학년: %s
@@ -375,6 +339,10 @@ public class AiService {
             2. 모든 문자열은 한 줄로 작성
             3. 문자열 내 따옴표는 작은따옴표(')로 대체
             4. LaTeX: 인라인 모드($...$), 백슬래시 1개
+            5. 필드 길이 제한:
+               - grade, subject, difficulty: 각 20자 이내
+               - answer: 100자 이내
+               - tags 배열 각 항목: 20자 이내
             
             [출력 형식]
             [
