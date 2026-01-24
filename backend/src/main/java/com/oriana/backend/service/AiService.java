@@ -32,12 +32,22 @@ public class AiService {
     private static final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
 
     private JsonNode callGeminiApi(String prompt) {
+        return callGeminiApiWithRetry(prompt, 2); // 최대 2번 시도
+    }
+
+    private JsonNode callGeminiApiWithRetry(String prompt, int maxRetries) {
         String url = GEMINI_URL + "?key=" + geminiApiKey;
 
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("contents", new Object[]{
                 Map.of("parts", new Object[]{Map.of("text", prompt)})
         });
+
+        // Gemini API 설정 추가
+        Map<String, Object> generationConfig = new HashMap<>();
+        generationConfig.put("maxOutputTokens", 8192); // 충분한 토큰 할당
+        generationConfig.put("temperature", 0.7);
+        requestBody.put("generationConfig", generationConfig);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -54,6 +64,12 @@ public class AiService {
             String aiText = root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
             log.info("=== AI 원본 응답 (처음 500자) ===\n{}", aiText.substring(0, Math.min(500, aiText.length())));
+
+            // 응답 완전성 체크
+            if (!aiText.trim().endsWith("]")) {
+                log.warn("⚠️ AI 응답이 불완전합니다 (']'로 끝나지 않음). 응답이 잘렸을 가능성이 있습니다.");
+                log.warn("응답 마지막 100자: {}", aiText.substring(Math.max(0, aiText.length() - 100)));
+            }
 
             // 1단계: JSON 배열 추출
             String jsonArray = extractJsonArray(aiText);
@@ -84,6 +100,18 @@ public class AiService {
 
         } catch (Exception e) {
             log.error("AI 데이터 파싱 최종 실패: {}", e.getMessage(), e);
+
+            // 재시도 로직
+            if (maxRetries > 1) {
+                log.warn("⚠️ {}번 남은 재시도로 다시 시도합니다...", maxRetries - 1);
+                try {
+                    Thread.sleep(1000); // 1초 대기
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+                return callGeminiApiWithRetry(prompt, maxRetries - 1);
+            }
+
             return null;
         }
     }
@@ -194,6 +222,7 @@ public class AiService {
                     if (i + 5 < json.length()) {
                         String hexChars = json.substring(i + 2, i + 6);
                         if (isValidHex(hexChars)) {
+
                             result.append("\\u").append(hexChars);
                             i += 5;
                         } else {
@@ -202,7 +231,6 @@ public class AiService {
                             i++; // u만 건너뜀
                         }
                     } else {
-                        //  뒤에 4자리 없음
                         result.append("\\\\u");
                         i++;
                     }
@@ -316,6 +344,7 @@ public class AiService {
                - grade, subject, difficulty: 각 20자 이내
                - answer: 100자 이내
                - tags 배열의 각 항목: 20자 이내
+            6. **solution(풀이)은 핵심만 간결하게 200자 이내로 작성**
             
             [조건]
             - 학년: %s
@@ -394,6 +423,7 @@ public class AiService {
                - grade, subject, difficulty: 각 20자 이내
                - answer: 100자 이내
                - tags 배열 각 항목: 20자 이내
+            6. **solution은 핵심만 간결하게 200자 이내로 작성**
             
             [출력 형식]
             [
