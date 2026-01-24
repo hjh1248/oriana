@@ -13,4 +13,4 @@ FROM eclipse-temurin:17-jdk-jammy
 WORKDIR /app
 # 빌드된 jar 파일만 가져오기
 COPY --from=builder /app/build/libs/*.jar app.jar
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Xms512m", "-Xmx512m", "-jar", "/app.jar"]
