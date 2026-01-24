@@ -134,7 +134,62 @@ public class AiService {
         // 2. JSON 문자열 값 내부의 줄바꿈을 공백으로 변경
         json = fixMultilineStrings(json);
 
+        // 3. 잘못된 백슬래시 이스케이프 수정 (LaTeX 수식 때문에 발생)
+        json = fixInvalidEscapes(json);
+
         return json;
+    }
+
+    /**
+     * 잘못된 이스케이프 시퀀스 수정
+     * JSON에서 허용되지 않는 \x 패턴을 \\x로 변경
+     */
+    private String fixInvalidEscapes(String json) {
+        // 그 외의 \x는 모두 \\x로 변경해야 함
+
+        StringBuilder result = new StringBuilder();
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            // 이스케이프 처리 중
+            if (escaped) {
+                // 유효한 이스케이프 문자인지 확인
+                if (c == '"' || c == '\\' || c == '/' || c == 'b' ||
+                        c == 'f' || c == 'n' || c == 'r' || c == 't' || c == 'u') {
+                    // 유효한 이스케이프 -> 그대로 유지
+                    result.append('\\').append(c);
+                } else {
+                    // 유효하지 않은 이스케이프 (예: \m, \s, \q)
+                    // -> 백슬래시를 하나 더 추가해서 \\m, \\s, \\q로 만듦
+                    result.append('\\').append('\\').append(c);
+                }
+                escaped = false;
+                continue;
+            }
+
+            // 따옴표 추적 (문자열 내부인지 판단)
+            if (c == '"') {
+                // 바로 앞이 이스케이프된 따옴표가 아닌 경우에만 토글
+                if (i == 0 || json.charAt(i - 1) != '\\') {
+                    inString = !inString;
+                }
+                result.append(c);
+                continue;
+            }
+
+            // 백슬래시 발견
+            if (c == '\\' && inString) {
+                escaped = true;
+                continue;
+            }
+
+            result.append(c);
+        }
+
+        return result.toString();
     }
 
     /**
@@ -260,7 +315,7 @@ public class AiService {
             1. 오직 JSON 배열만 출력 (설명문, 마크다운 코드블록 금지)
             2. 모든 문자열 값은 한 줄로 작성 (줄바꿈 금지)
             3. 문자열 내부의 따옴표는 작은따옴표(')로 대체
-            4. LaTeX 수식: 인라인 모드만 사용 ($...$), 백슬래시 1개 (\\frac)
+            4. LaTeX 수식: 인라인 모드만 사용 ($...$), 백슬래시는 반드시 2개 사용 (\\\\frac, \\\\mathrm)
             5. 필드 길이 제한을 엄수하세요:
                - grade, subject, difficulty: 각 20자 이내
                - answer: 100자 이내
@@ -338,7 +393,7 @@ public class AiService {
             1. 오직 JSON 배열만 출력
             2. 모든 문자열은 한 줄로 작성
             3. 문자열 내 따옴표는 작은따옴표(')로 대체
-            4. LaTeX: 인라인 모드($...$), 백슬래시 1개
+            4. LaTeX: 인라인 모드($...$), 백슬래시 2개 (\\\\frac, \\\\mathrm)
             5. 필드 길이 제한:
                - grade, subject, difficulty: 각 20자 이내
                - answer: 100자 이내
