@@ -15,7 +15,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 @Slf4j
 @Service
@@ -28,7 +27,6 @@ public class ProblemService {
     // ✨ 1. 맞춤 추천 문제 3개 생성 & DB 저장
     @Transactional
     public List<ProblemResponseDto> createRecommendedProblem(ProblemRequestDto prefs) {
-        // AI가 3개짜리 JSON 배열을 리턴함
         JsonNode aiResponseArray = aiService.generateRecommendedProblem(prefs);
         return saveProblemListToDb(aiResponseArray, ProblemSource.RECOMMEND, null);
     }
@@ -69,41 +67,78 @@ public class ProblemService {
                     continue;
                 }
 
-                // 💡 1. 보기(Options) 리스트 추출
+                // 💡 1. 보기(Options) 리스트 추출 - 각 항목 길이 제한
                 List<String> optionsList = new ArrayList<>();
-                json.path("options").forEach(opt -> optionsList.add(opt.asText()));
+                json.path("options").forEach(opt -> {
+                    String optText = opt.asText();
+                    // 각 선택지는 500자로 제한 (안전)
+                    if (optText.length() > 500) {
+                        optText = optText.substring(0, 500);
+                        log.warn("⚠️ 선택지가 500자를 초과하여 잘랐습니다.");
+                    }
+                    optionsList.add(optText);
+                });
 
-                // 💡 2. 태그(Tags) 리스트 추출
+                // 💡 2. 태그(Tags) 리스트 추출 - 각 항목 길이 제한
                 List<String> tagsList = new ArrayList<>();
-                json.path("tags").forEach(tag -> tagsList.add(tag.asText()));
+                json.path("tags").forEach(tag -> {
+                    String tagText = tag.asText();
+                    // 각 태그는 50자로 제한
+                    if (tagText.length() > 50) {
+                        tagText = tagText.substring(0, 50);
+                        log.warn("⚠️ 태그가 50자를 초과하여 잘랐습니다: {}", tagText);
+                    }
+                    tagsList.add(tagText);
+                });
 
-                // 💡 3. Entity 생성
+                // 💡 3. 길이 제한이 있는 필드들을 안전하게 추출
+                // Entity에서 VARCHAR(255)로 설정된 필드들
+                String grade = truncate(json.path("grade").asText("고1"), 255, "학년");
+                String subject = truncate(json.path("subject").asText("수학"), 255, "과목");
+                String difficulty = truncate(json.path("difficulty").asText("중"), 255, "난이도");
+
+                // TEXT 타입 필드들 (여유있게 설정)
+                String question = json.path("question").asText();
+                String answer = json.path("answer").asText("");
+                String solution = json.path("solution").asText("풀이가 제공되지 않습니다.");
+
+                // 💡 4. Entity 생성
                 Problem problem = Problem.builder()
                         .parentProblem(parent)
                         .sourceType(source)
-                        .grade(json.path("grade").asText("고1")) // 기본값 설정
-                        .subject(json.path("subject").asText("수학"))
-                        .difficulty(json.path("difficulty").asText("중"))
+                        .grade(grade)
+                        .subject(subject)
+                        .difficulty(difficulty)
                         .tags(tagsList)
-                        .question(json.path("question").asText())
+                        .question(question)
                         .options(optionsList)
-                        .answer(json.path("answer").asText())
-                        .solution(json.path("solution").asText("풀이가 제공되지 않습니다."))
+                        .answer(answer)
+                        .solution(solution)
                         .points(json.path("points").asInt(20))
                         .isSubjective(json.path("isSubjective").asBoolean(false))
                         .build();
 
                 newProblems.add(problem);
+                log.info("✅ 문제 생성 완료: {} (태그: {}개, 선택지: {}개)",
+                        question.substring(0, Math.min(30, question.length())),
+                        tagsList.size(),
+                        optionsList.size());
 
             } catch (Exception e) {
                 // 🛡️ [방어 3] 특정 문제 하나가 파싱하다 터져도, 나머지 문제는 살림!
-                log.error("❌ 개별 문제 변환 중 오류 발생 (해당 문제만 스킵): {}", e.getMessage());
+                log.error("❌ 개별 문제 변환 중 오류 발생 (해당 문제만 스킵): {}", e.getMessage(), e);
             }
         }
 
         // 하나라도 제대로 파싱된 문제가 있다면 저장
         if (!newProblems.isEmpty()) {
-            problemRepository.saveAll(newProblems);
+            try {
+                problemRepository.saveAll(newProblems);
+                log.info("✅ 총 {}개의 문제가 DB에 저장되었습니다.", newProblems.size());
+            } catch (Exception e) {
+                log.error("❌ DB 저장 실패: {}", e.getMessage(), e);
+                return new ArrayList<>();
+            }
         }
 
         return newProblems.stream()
@@ -111,13 +146,31 @@ public class ProblemService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 🛡️ 문자열 길이 제한 유틸리티
+     * DB 컬럼 길이를 초과하지 않도록 안전하게 자르기
+     */
+    private String truncate(String str, int maxLength, String fieldName) {
+        if (str == null || str.isEmpty()) {
+            return str == null ? "" : str;
+        }
+
+        if (str.length() <= maxLength) {
+            return str;
+        }
+
+        log.warn("⚠️ {}이(가) {}자를 초과하여 잘랐습니다. 원본 길이: {}, 잘린 내용: {}...",
+                fieldName, maxLength, str.length(),
+                str.substring(0, Math.min(30, str.length())));
+
+        return str.substring(0, maxLength);
+    }
+
     @Transactional(readOnly = true)
     public ProblemResponseDto getProblemById(Long id) {
-        // 1. DB에서 ID로 조회, 없으면 404 느낌의 예외 던지기
         Problem problem = problemRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("해당 문제를 찾을 수 없어! ID: " + id));
 
-        // 2. Entity를 프론트가 쓰기 좋은 DTO로 변환해서 리턴
         return ProblemResponseDto.from(problem);
     }
 
@@ -126,17 +179,12 @@ public class ProblemService {
         Problem baseProblem = problemRepository.findById(baseId)
                 .orElseThrow(() -> new IllegalArgumentException("원본 문제를 찾을 수 없습니다."));
 
-        // AI를 통해 유사 문제 3개 생성
         JsonNode aiResponseArray = aiService.generateSimilarProblem(baseProblem);
-
-        // DB 저장 후 DTO로 반환
         return saveProblemListToDb(aiResponseArray, ProblemSource.SIMILAR, baseProblem);
     }
 
-    // 📋 [조회] 이미 생성된 유사 문제 리스트 가져오기 (GET 요청 시 사용)
     @Transactional(readOnly = true)
     public List<ProblemResponseDto> getSimilarProblems(Long baseId) {
-        // DB에서 해당 baseId를 부모로 가진 문제들을 싹 긁어와
         List<Problem> similarList = problemRepository.findByParentProblemIdOrderByCreatedAtDesc(baseId);
 
         return similarList.stream()
