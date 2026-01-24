@@ -7,6 +7,7 @@ import com.oriana.backend.dto.ProblemRequestDto;
 import com.oriana.backend.dto.ProblemResponseDto;
 import com.oriana.backend.repository.ProblemRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProblemService {
@@ -52,40 +54,58 @@ public class ProblemService {
     private List<ProblemResponseDto> saveProblemListToDb(JsonNode jsonArray, ProblemSource source, Problem parent) {
         List<Problem> newProblems = new ArrayList<>();
 
-        // JSON 배열을 돌면서 각각의 문제 데이터를 추출
-        for (JsonNode json : jsonArray) {
-
-            // 💡 1. 보기(Options) 리스트 추출
-            List<String> optionsList = new ArrayList<>();
-            json.path("options").forEach(opt -> optionsList.add(opt.asText()));
-
-            // 💡 2. 태그(Tags) 리스트 추출
-            List<String> tagsList = new ArrayList<>();
-            json.path("tags").forEach(tag -> tagsList.add(tag.asText()));
-
-            // 💡 3. AI가 준 메타데이터를 그대로 사용해서 Entity 생성!
-            Problem problem = Problem.builder()
-                    .parentProblem(parent) // 유사 문제일 때만 원본 ID가 연결됨
-                    .sourceType(source)
-                    .grade(json.path("grade").asText())           // AI가 판단한 학년
-                    .subject(json.path("subject").asText())       // AI가 판단한 과목
-                    .difficulty(json.path("difficulty").asText()) // AI가 조절한 난이도
-                    .tags(tagsList)                               // AI가 추출한 핵심 개념 태그들!
-                    .question(json.path("question").asText())
-                    .options(optionsList)
-                    .answer(json.path("answer").asText())
-                    .solution(json.path("solution").asText())
-                    .points(json.path("points").asInt())          // AI가 책정한 보상 포인트!
-                    .isSubjective(json.path("isSubjective").asBoolean())
-                    .build();
-
-            newProblems.add(problem);
+        // 🛡️ [방어 1] AI 응답 자체가 null이거나 배열이 아니면 빈 리스트 반환
+        if (jsonArray == null || !jsonArray.isArray()) {
+            log.error("🚨 AI 응답이 비어있거나 형식이 올바르지 않아 저장을 건너뜁니다.");
+            return new ArrayList<>();
         }
 
-        // DB에 3개 한 번에 촥! 저장 (성능 최적화)
-        problemRepository.saveAll(newProblems);
+        // JSON 배열을 돌면서 각각의 문제 데이터를 추출
+        for (JsonNode json : jsonArray) {
+            try {
+                // 🛡️ [방어 2] 필수 필드(문제 텍스트)가 없으면 이 문제는 스킵
+                if (json.path("question").isMissingNode() || json.path("question").asText().isEmpty()) {
+                    log.warn("⚠️ 필수 데이터(질문)가 없는 문제가 있어 스킵합니다.");
+                    continue;
+                }
 
-        // 프론트엔드로 보낼 DTO 리스트로 변환해서 리턴
+                // 💡 1. 보기(Options) 리스트 추출
+                List<String> optionsList = new ArrayList<>();
+                json.path("options").forEach(opt -> optionsList.add(opt.asText()));
+
+                // 💡 2. 태그(Tags) 리스트 추출
+                List<String> tagsList = new ArrayList<>();
+                json.path("tags").forEach(tag -> tagsList.add(tag.asText()));
+
+                // 💡 3. Entity 생성
+                Problem problem = Problem.builder()
+                        .parentProblem(parent)
+                        .sourceType(source)
+                        .grade(json.path("grade").asText("고1")) // 기본값 설정
+                        .subject(json.path("subject").asText("수학"))
+                        .difficulty(json.path("difficulty").asText("중"))
+                        .tags(tagsList)
+                        .question(json.path("question").asText())
+                        .options(optionsList)
+                        .answer(json.path("answer").asText())
+                        .solution(json.path("solution").asText("풀이가 제공되지 않습니다."))
+                        .points(json.path("points").asInt(20))
+                        .isSubjective(json.path("isSubjective").asBoolean(false))
+                        .build();
+
+                newProblems.add(problem);
+
+            } catch (Exception e) {
+                // 🛡️ [방어 3] 특정 문제 하나가 파싱하다 터져도, 나머지 문제는 살림!
+                log.error("❌ 개별 문제 변환 중 오류 발생 (해당 문제만 스킵): {}", e.getMessage());
+            }
+        }
+
+        // 하나라도 제대로 파싱된 문제가 있다면 저장
+        if (!newProblems.isEmpty()) {
+            problemRepository.saveAll(newProblems);
+        }
+
         return newProblems.stream()
                 .map(ProblemResponseDto::from)
                 .collect(Collectors.toList());

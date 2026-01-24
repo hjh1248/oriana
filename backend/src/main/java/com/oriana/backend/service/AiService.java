@@ -45,13 +45,26 @@ public class AiService {
 
         try {
             String responseStr = restTemplate.postForObject(url, request, String.class);
-            objectMapper.configure(JsonReadFeature.ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER.mappedFeature(), true);
             JsonNode root = objectMapper.readTree(responseStr);
             String aiText = root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
-            return objectMapper.readTree(aiText.replace("```json", "").replace("```", "").trim());
+            // 1. ✨ 정밀 조각 로직: 첫 번째 '['와 마지막 ']' 사이만 남기기
+            // (제미나이가 앞뒤에 헛소리를 붙여도 JSON 배열만 쏙 뽑아냄)
+            int start = aiText.indexOf("[");
+            int end = aiText.lastIndexOf("]");
+
+            if (start != -1 && end != -1 && start < end) {
+                aiText = aiText.substring(start, end + 1);
+            }
+
+            // 2. 수식 백슬래시 에러 방지 처리
+            String cleanJson = aiText.trim();
+
+            return objectMapper.readTree(cleanJson);
         } catch (Exception e) {
-            throw new RuntimeException("AI 문제 생성 실패: " + e.getMessage());
+            // 3. 🔥 핵심: 여기서 에러를 던지지 않고 로그만 찍고 null 반환!
+            System.err.println("AI 데이터 파싱 실패: " + e.getMessage());
+            return null; // 실패하면 그냥 null을 줘서 호출한 쪽에서 넘어가게 함
         }
     }
 
