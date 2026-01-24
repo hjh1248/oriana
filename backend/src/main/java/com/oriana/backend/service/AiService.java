@@ -72,7 +72,14 @@ public class AiService {
 
                 // 최후의 수단: 더 공격적인 정제
                 String recoveredJson = aggressiveJsonRecovery(cleanJson);
-                return objectMapper.readTree(recoveredJson);
+
+                try {
+                    return objectMapper.readTree(recoveredJson);
+                } catch (JsonProcessingException e2) {
+                    log.error("=== JSON 파싱 2차 실패 ===");
+                    log.error("복구 시도한 JSON (처음 500자):\n{}", recoveredJson.substring(0, Math.min(500, recoveredJson.length())));
+                    throw new RuntimeException("AI 문제 생성 실패: " + e2.getMessage());
+                }
             }
 
         } catch (Exception e) {
@@ -145,51 +152,90 @@ public class AiService {
      * JSON에서 허용되지 않는 \x 패턴을 \\x로 변경
      */
     private String fixInvalidEscapes(String json) {
-        // 그 외의 \x는 모두 \\x로 변경해야 함
-
         StringBuilder result = new StringBuilder();
         boolean inString = false;
-        boolean escaped = false;
 
         for (int i = 0; i < json.length(); i++) {
             char c = json.charAt(i);
 
-            // 이스케이프 처리 중
-            if (escaped) {
-                // 유효한 이스케이프 문자인지 확인
-                if (c == '"' || c == '\\' || c == '/' || c == 'b' ||
-                        c == 'f' || c == 'n' || c == 'r' || c == 't' || c == 'u') {
-                    // 유효한 이스케이프 -> 그대로 유지
-                    result.append('\\').append(c);
-                } else {
-                    // 유효하지 않은 이스케이프 (예: \m, \s, \q)
-                    // -> 백슬래시를 하나 더 추가해서 \\m, \\s, \\q로 만듦
-                    result.append('\\').append('\\').append(c);
-                }
-                escaped = false;
-                continue;
-            }
-
-            // 따옴표 추적 (문자열 내부인지 판단)
+            // 따옴표 토글 (문자열 시작/끝 추적)
             if (c == '"') {
-                // 바로 앞이 이스케이프된 따옴표가 아닌 경우에만 토글
-                if (i == 0 || json.charAt(i - 1) != '\\') {
+                // 이스케이프되지 않은 따옴표인지 확인
+                int backslashCount = 0;
+                for (int j = i - 1; j >= 0 && json.charAt(j) == '\\'; j--) {
+                    backslashCount++;
+                }
+                // 백슬래시가 짝수 개면 이스케이프되지 않은 따옴표
+                if (backslashCount % 2 == 0) {
                     inString = !inString;
                 }
                 result.append(c);
                 continue;
             }
 
-            // 백슬래시 발견
-            if (c == '\\' && inString) {
-                escaped = true;
+            // 문자열 내부가 아니면 그대로 출력
+            if (!inString) {
+                result.append(c);
                 continue;
             }
 
-            result.append(c);
+            // 문자열 내부에서 백슬래시 발견
+            if (c == '\\' && i + 1 < json.length()) {
+                char next = json.charAt(i + 1);
+
+                // 유효한 기본 이스케이프 문자
+                if (next == '"' || next == '\\' || next == '/' || next == 'b' ||
+                        next == 'f' || next == 'n' || next == 'r' || next == 't') {
+                    result.append(c).append(next);
+                    i++; // 다음 문자 건너뜀
+                }
+                // 유니코드 이스케이프
+                else if (next == 'u') {
+                    if (i + 5 < json.length()) {
+                        String hexChars = json.substring(i + 2, i + 6);
+                        if (isValidHex(hexChars)) {
+                            result.append("\\u").append(hexChars);
+                            i += 5;
+                        } else {
+                            // 잘못된 유니코드 -> \\u로 변경
+                            result.append("\\\\u");
+                            i++; // u만 건너뜀
+                        }
+                    } else {
+                        //  뒤에 4자리 없음
+                        result.append("\\\\u");
+                        i++;
+                    }
+                }
+                // 유효하지 않은 이스케이프 (LaTeX 명령어 등)
+                else {
+                    // \d, \m, \s 등 -> \\d, \\m, \\s로 변경
+                    result.append("\\\\").append(next);
+                    i++; // 다음 문자 건너뜀
+                }
+            } else {
+                result.append(c);
+            }
         }
 
         return result.toString();
+    }
+
+    /**
+     * 4자리 16진수인지 확인
+     */
+    private boolean isValidHex(String str) {
+        if (str.length() != 4) {
+            return false;
+        }
+        for (char c : str.toCharArray()) {
+            if (!((c >= '0' && c <= '9') ||
+                    (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F'))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -247,60 +293,10 @@ public class AiService {
         // 2. 잘못된 trailing comma 제거
         json = json.replaceAll(",\\s*([}\\]])", "$1");
 
-        // 3. 문자열 값 내 이스케이프되지 않은 따옴표 처리
-        json = escapeUnescapedQuotes(json);
+        // 3. 다시 한번 이스케이프 수정 (중요!)
+        json = fixInvalidEscapes(json);
 
         return json;
-    }
-
-    /**
-     * 문자열 값 내부의 이스케이프되지 않은 따옴표 처리
-     */
-    private String escapeUnescapedQuotes(String json) {
-        StringBuilder result = new StringBuilder();
-        boolean inString = false;
-        boolean escaped = false;
-
-        for (int i = 0; i < json.length(); i++) {
-            char c = json.charAt(i);
-
-            if (escaped) {
-                result.append(c);
-                escaped = false;
-                continue;
-            }
-
-            if (c == '\\') {
-                result.append(c);
-                escaped = true;
-                continue;
-            }
-
-            if (c == '"') {
-                // JSON 키나 값의 시작/끝을 판단
-                if (!inString) {
-                    // 문자열 시작
-                    inString = true;
-                    result.append(c);
-                } else {
-                    // 다음 문자를 보고 문자열 끝인지 판단
-                    char next = (i < json.length() - 1) ? json.charAt(i + 1) : ' ';
-                    if (next == ',' || next == '}' || next == ']' || next == ':' || Character.isWhitespace(next)) {
-                        // 문자열 끝
-                        inString = false;
-                        result.append(c);
-                    } else {
-                        // 문자열 중간의 따옴표 -> 작은따옴표로 변경
-                        result.append('\'');
-                    }
-                }
-                continue;
-            }
-
-            result.append(c);
-        }
-
-        return result.toString();
     }
 
     /**
