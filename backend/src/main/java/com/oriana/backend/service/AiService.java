@@ -2,9 +2,11 @@ package com.oriana.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.oriana.backend.domain.Problem;
 import com.oriana.backend.dto.ProblemRequestDto;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -13,10 +15,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import java.util.Base64;
-
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiService {
@@ -43,39 +47,56 @@ public class AiService {
 
         try {
             String responseStr = restTemplate.postForObject(url, request, String.class);
+            if (responseStr == null) {
+                log.error("Gemini API 응답이 null입니다.");
+                return null;
+            }
+
             JsonNode root = objectMapper.readTree(responseStr);
             String aiText = root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
-            // 개선된 JSON 추출 로직
-            String cleanJson = extractJsonArray(aiText);
+            log.info("=== AI 원본 응답 (처음 500자) ===\n{}", aiText.substring(0, Math.min(500, aiText.length())));
 
-            // JSON 파싱 전 추가 정제
-            cleanJson = sanitizeJsonString(cleanJson);
+            // 1단계: JSON 배열 추출
+            String jsonArray = extractJsonArray(aiText);
+            log.info("=== JSON 추출 완료 (길이: {}) ===", jsonArray.length());
 
-            return objectMapper.readTree(cleanJson);
+            // 2단계: JSON 정제 (가장 중요!)
+            String cleanJson = sanitizeJson(jsonArray);
+            log.info("=== JSON 정제 완료 ===");
+
+            // 3단계: 파싱 시도
+            try {
+                return objectMapper.readTree(cleanJson);
+            } catch (JsonProcessingException e) {
+                log.error("=== JSON 파싱 1차 실패, 추가 복구 시도 ===");
+                log.error("파싱 실패한 JSON (처음 1000자):\n{}", cleanJson.substring(0, Math.min(1000, cleanJson.length())));
+
+                // 최후의 수단: 더 공격적인 정제
+                String recoveredJson = aggressiveJsonRecovery(cleanJson);
+                return objectMapper.readTree(recoveredJson);
+            }
+
         } catch (Exception e) {
-            System.err.println("AI 데이터 파싱 실패: " + e.getMessage());
-            System.err.println("응답 원본: " + (responseStr != null ? responseStr.substring(0, Math.min(500, responseStr.length())) : "null"));
+            log.error("AI 데이터 파싱 최종 실패: {}", e.getMessage(), e);
             return null;
         }
     }
 
     /**
-     * JSON 배열 추출 - 더 견고한 방식
+     * JSON 배열 추출 - 중첩 배열 지원
      */
     private String extractJsonArray(String text) {
-        // 1. Markdown 코드 블록 제거
+        // Markdown 코드 블록 제거
         text = text.replaceAll("```json\\s*", "").replaceAll("```\\s*", "");
-
-        // 2. 앞뒤 공백 제거
         text = text.trim();
 
-        // 3. 첫 번째 '['를 찾고, 매칭되는 ']'를 찾기 (중첩 배열 고려)
         int firstBracket = text.indexOf('[');
         if (firstBracket == -1) {
-            return text; // 배열이 없으면 원본 반환
+            return text;
         }
 
+        // 매칭되는 닫는 괄호 찾기 (중첩 고려)
         int depth = 0;
         int endBracket = -1;
 
@@ -96,7 +117,7 @@ public class AiService {
             return text.substring(firstBracket, endBracket + 1);
         }
 
-        // 매칭 실패 시 기존 방식으로 폴백
+        // 매칭 실패 시 마지막 ] 사용
         int lastBracket = text.lastIndexOf(']');
         if (lastBracket != -1) {
             return text.substring(firstBracket, lastBracket + 1);
@@ -106,41 +127,189 @@ public class AiService {
     }
 
     /**
-     * JSON 문자열 정제 - 파싱 오류 방지
+     * JSON 정제 - 파싱 오류를 일으키는 요소 제거/수정
      */
-    private String sanitizeJsonString(String json) {
-        // 1. 제어 문자 제거 (탭, 개행 등은 유지)
-        json = json.replaceAll("[\\x00-\\x09\\x0B\\x0C\\x0E-\\x1F\\x7F]", "");
+    private String sanitizeJson(String json) {
+        // 1. 제어 문자 제거 (탭/개행 제외)
+        json = json.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "");
 
-        // 2. 불필요한 이스케이프 정리 (이미 이스케이프된 경우)
-        // LaTeX의 경우 \\frac이나 \\\\frac 둘 다 허용되도록 유연하게 처리
+        // 2. JSON 문자열 값 내부의 줄바꿈을 공백으로 변경
+        // "question": "이것은
+        // 두 줄입니다" -> "question": "이것은 두 줄입니다"
+        json = fixMultilineStrings(json);
+
+        // 3. 잘못된 이스케이프 시퀀스 수정
+        // \" 뒤에 바로 문자가 오는 경우 등
+        json = fixEscapeSequences(json);
 
         return json;
     }
 
     /**
-     * 1. [맞춤 추천] 프롬프트 - 개선된 버전
+     * JSON 문자열 내부의 개행 문자 처리
+     */
+    private String fixMultilineStrings(String json) {
+        // "key": "value with
+        // newline" 패턴을 찾아서 개행을 공백으로 치환
+        StringBuilder result = new StringBuilder();
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            if (escaped) {
+                result.append(c);
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\') {
+                result.append(c);
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"') {
+                inString = !inString;
+                result.append(c);
+                continue;
+            }
+
+            // 문자열 내부의 개행을 공백으로 변경
+            if (inString && (c == '\n' || c == '\r')) {
+                result.append(' ');
+                continue;
+            }
+
+            result.append(c);
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * 이스케이프 시퀀스 수정
+     */
+    private String fixEscapeSequences(String json) {
+        // 문자열 값 내부의 따옴표가 이스케이프되지 않은 경우 수정
+        // 정규식으로 "key": "value "with" quotes" 패턴 찾기
+        Pattern pattern = Pattern.compile("\"(question|solution|answer|options)\"\\s*:\\s*\"([^\"]*?)\"");
+        Matcher matcher = pattern.matcher(json);
+
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String value = matcher.group(2);
+
+            // 값 내부의 이스케이프되지 않은 따옴표 처리
+            // 이미 \"로 이스케이프된 것은 보존
+            String fixedValue = value.replaceAll("(?<!\\\\)\"", "\\\\\"");
+
+            matcher.appendReplacement(sb, "\"" + key + "\": \"" + fixedValue + "\"");
+        }
+        matcher.appendTail(sb);
+
+        return sb.toString();
+    }
+
+    /**
+     * 최후의 수단: 공격적인 JSON 복구
+     */
+    private String aggressiveJsonRecovery(String json) {
+        log.warn("공격적인 JSON 복구 시도 중...");
+
+        // 1. 모든 연속된 공백을 하나로
+        json = json.replaceAll("\\s+", " ");
+
+        // 2. 문자열 값 내부의 따옴표를 모두 작은따옴표로 변경
+        json = replaceQuotesInStringValues(json);
+
+        // 3. 잘못된 trailing comma 제거
+        json = json.replaceAll(",\\s*([}\\]])", "$1");
+
+        return json;
+    }
+
+    /**
+     * 문자열 값 내부의 따옴표를 작은따옴표로 변경
+     */
+    private String replaceQuotesInStringValues(String json) {
+        StringBuilder result = new StringBuilder();
+        boolean inString = false;
+        boolean inKey = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            char prev = i > 0 ? json.charAt(i - 1) : ' ';
+            char next = i < json.length() - 1 ? json.charAt(i + 1) : ' ';
+
+            if (escaped) {
+                result.append(c);
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\') {
+                result.append(c);
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"') {
+                // 키-값 구분: "key": 다음 따옴표는 값 시작
+                if (!inString && next == ':') {
+                    inKey = true;
+                    result.append(c);
+                    inString = true;
+                } else if (!inString && prev == ':') {
+                    inKey = false;
+                    result.append(c);
+                    inString = true;
+                } else if (inString && !inKey) {
+                    // 값 내부의 따옴표는 작은따옴표로
+                    if (next != ',' && next != '}' && next != ']') {
+                        result.append('\'');
+                    } else {
+                        result.append(c);
+                        inString = false;
+                    }
+                } else {
+                    result.append(c);
+                    inString = !inString;
+                }
+                continue;
+            }
+
+            result.append(c);
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * 1. [맞춤 추천] 프롬프트
      */
     public JsonNode generateRecommendedProblem(ProblemRequestDto prefs) {
         String prompt = String.format("""
             당신은 대한민국 최고 수준의 %s 강사입니다.
-            다음 조건에 맞는 문제를 3개 생성하고, 반드시 JSON 배열 형식으로만 답변하세요.
+            다음 조건에 맞는 문제를 3개 생성하고, 반드시 유효한 JSON 배열로만 응답하세요.
             
-            ⚠️ 중요: 다른 설명이나 텍스트 없이 오직 JSON 배열만 출력하세요. ```json 같은 마크다운 코드블록도 사용하지 마세요.
+            ⚠️ 중요 규칙:
+            1. 오직 JSON 배열만 출력 (설명문, 마크다운 코드블록 금지)
+            2. 모든 문자열 값은 한 줄로 작성 (줄바꿈 금지)
+            3. 문자열 내부의 따옴표는 작은따옴표(')로 대체
+            4. LaTeX 수식: 인라인 모드만 사용 ($...$), 백슬래시 1개 (\\frac)
             
             [조건]
             - 학년: %s
-            - 과목: %s
+            - 과목: %s  
             - 단원: %s
             - 난이도: %s
             - 유형: %s
             
-            [수식 작성 규칙]
-            - LaTeX 수식은 인라인 모드($...$)로 작성
-            - 백슬래시는 한 번만 사용 (\\frac, \\sqrt 등)
-            - JSON 문자열 내부이므로 특수문자 이스케이프에 주의
-            
-            [출력 형식]
+            [출력 예시]
             [
                 {
                   "grade": "%s",
@@ -148,20 +317,20 @@ public class AiService {
                   "difficulty": "%s",
                   "tags": ["개념1", "개념2"],
                   "points": 20,
-                  "question": "문제 텍스트",
-                  "options": ["①", "②", "③", "④"],
+                  "question": "문제 텍스트 (한 줄, 따옴표는 ' 사용)",
+                  "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
                   "answer": "정답",
-                  "solution": "풀이",
+                  "solution": "풀이 과정 (한 줄로 작성)",
                   "isSubjective": false
                 },
                 {
                   "grade": "%s",
                   "subject": "%s",
                   "difficulty": "%s",
-                  "tags": ["개념3", "개념4"],
+                  "tags": ["개념3"],
                   "points": 25,
-                  "question": "문제 텍스트",
-                  "options": ["①", "②", "③", "④"],
+                  "question": "두 번째 문제",
+                  "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
                   "answer": "정답",
                   "solution": "풀이",
                   "isSubjective": false
@@ -170,17 +339,15 @@ public class AiService {
                   "grade": "%s",
                   "subject": "%s",
                   "difficulty": "상",
-                  "tags": ["심화", "응용"],
+                  "tags": ["심화"],
                   "points": 30,
-                  "question": "문제 텍스트",
+                  "question": "세 번째 문제",
                   "options": [],
                   "answer": "정답",
                   "solution": "풀이",
                   "isSubjective": true
                 }
             ]
-            
-            위 형식을 정확히 따라 JSON 배열만 출력하세요.
             """,
                 prefs.getSubject(),
                 prefs.getGrade(), prefs.getSubject(), prefs.getUnit(), prefs.getDifficulty(), prefs.getType(),
@@ -193,7 +360,7 @@ public class AiService {
     }
 
     /**
-     * 2. [유사 문제] 프롬프트 - 개선된 버전
+     * 2. [유사 문제] 프롬프트
      */
     public JsonNode generateSimilarProblem(Problem baseProblem) {
         String prompt = String.format("""
@@ -203,11 +370,11 @@ public class AiService {
             [원본 문제]
             %s
             
-            ⚠️ 중요: 다른 설명 없이 오직 JSON 배열만 출력하세요. ```json 같은 마크다운도 사용하지 마세요.
-            
-            [수식 작성 규칙]
-            - LaTeX 수식은 인라인 모드($...$)로 작성
-            - 백슬래시는 한 번만 사용 (\\frac, \\sqrt 등)
+            ⚠️ 중요 규칙:
+            1. 오직 JSON 배열만 출력
+            2. 모든 문자열은 한 줄로 작성
+            3. 문자열 내 따옴표는 작은따옴표(')로 대체
+            4. LaTeX: 인라인 모드($...$), 백슬래시 1개
             
             [출력 형식]
             [
@@ -217,7 +384,19 @@ public class AiService {
                   "difficulty": "%s",
                   "tags": ["유사", "변형"],
                   "points": %d,
-                  "question": "변형된 문제1",
+                  "question": "변형 문제1 (한 줄)",
+                  "options": ["①", "②", "③", "④"],
+                  "answer": "정답",
+                  "solution": "풀이 (한 줄)",
+                  "isSubjective": %s
+                },
+                {
+                  "grade": "%s",
+                  "subject": "%s",
+                  "difficulty": "%s",
+                  "tags": ["유사"],
+                  "points": %d,
+                  "question": "변형 문제2",
                   "options": ["①", "②", "③", "④"],
                   "answer": "정답",
                   "solution": "풀이",
@@ -227,44 +406,30 @@ public class AiService {
                   "grade": "%s",
                   "subject": "%s",
                   "difficulty": "%s",
-                  "tags": ["유사", "변형"],
+                  "tags": ["유사"],
                   "points": %d,
-                  "question": "변형된 문제2",
-                  "options": ["①", "②", "③", "④"],
-                  "answer": "정답",
-                  "solution": "풀이",
-                  "isSubjective": %s
-                },
-                {
-                  "grade": "%s",
-                  "subject": "%s",
-                  "difficulty": "%s",
-                  "tags": ["유사", "변형"],
-                  "points": %d,
-                  "question": "변형된 문제3",
+                  "question": "변형 문제3",
                   "options": ["①", "②", "③", "④"],
                   "answer": "정답",
                   "solution": "풀이",
                   "isSubjective": %s
                 }
             ]
-            
-            위 형식을 정확히 따라 JSON 배열만 출력하세요.
             """,
                 baseProblem.getQuestion(),
                 baseProblem.getGrade(), baseProblem.getSubject(), baseProblem.getDifficulty(),
-                baseProblem.getPoints(), baseProblem.getIsSubjective(),
+                baseProblem.getPoints(), baseProblem.isSubjective(),
                 baseProblem.getGrade(), baseProblem.getSubject(), baseProblem.getDifficulty(),
-                baseProblem.getPoints(), baseProblem.getIsSubjective(),
+                baseProblem.getPoints(), baseProblem.isSubjective(),
                 baseProblem.getGrade(), baseProblem.getSubject(), baseProblem.getDifficulty(),
-                baseProblem.getPoints(), baseProblem.getIsSubjective()
+                baseProblem.getPoints(), baseProblem.isSubjective()
         );
 
         return callGeminiApi(prompt);
     }
 
     /**
-     * 3. [멀티모달] 이미지 분석 - 개선된 버전
+     * 3. [멀티모달] 이미지 분석
      */
     public JsonNode analyzePhotoDirectly(MultipartFile imageFile) {
         String url = GEMINI_URL + "?key=" + geminiApiKey;
@@ -278,15 +443,15 @@ public class AiService {
                     Map.of("parts", new Object[]{
                             Map.of("text", """
                         당신은 이미지 속 문제를 디지털로 변환하는 전문가입니다.
-                        첨부된 이미지를 분석하여 단 1개의 문제 데이터를 JSON 배열로 반환하세요.
+                        첨부된 이미지를 분석하여 1개의 문제를 JSON 배열로 반환하세요.
                         
-                        ⚠️ 중요: 다른 설명 없이 오직 JSON 배열만 출력하세요. ```json 같은 마크다운도 사용하지 마세요.
+                        ⚠️ 중요:
+                        1. 오직 JSON 배열만 출력
+                        2. 문자열은 한 줄로 작성
+                        3. 따옴표는 작은따옴표(')로 대체
+                        4. LaTeX: $...$ 형식, 백슬래시 1개
                         
-                        [수식 작성 규칙]
-                        - LaTeX 수식은 인라인 모드($...$)로 작성
-                        - 백슬래시는 한 번만 사용 (\\frac, \\sqrt 등)
-                        
-                        [출력 형식]
+                        [출력]
                         [
                             {
                               "grade": "고1",
@@ -294,15 +459,13 @@ public class AiService {
                               "difficulty": "중",
                               "tags": ["사진분석"],
                               "points": 20,
-                              "question": "이미지에서 추출한 문제",
+                              "question": "이미지 문제 (한 줄)",
                               "options": ["①", "②", "③", "④"],
                               "answer": "정답",
-                              "solution": "풀이",
+                              "solution": "풀이 (한 줄)",
                               "isSubjective": false
                             }
                         ]
-                        
-                        위 형식을 정확히 따라 JSON 배열만 출력하세요.
                         """),
                             Map.of("inline_data", Map.of(
                                     "mime_type", mimeType,
@@ -319,13 +482,13 @@ public class AiService {
             JsonNode root = objectMapper.readTree(responseStr);
             String aiText = root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
-            String cleanJson = extractJsonArray(aiText);
-            cleanJson = sanitizeJsonString(cleanJson);
+            String jsonArray = extractJsonArray(aiText);
+            String cleanJson = sanitizeJson(jsonArray);
 
             return objectMapper.readTree(cleanJson);
 
         } catch (Exception e) {
-            System.err.println("사진 분석 실패: " + e.getMessage());
+            log.error("사진 분석 실패: {}", e.getMessage(), e);
             return null;
         }
     }

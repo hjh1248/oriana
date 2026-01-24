@@ -1,1 +1,36 @@
 pgdata/
+
+# 1. Version Control (깃 관련 정보는 이미지에 필요 없음)
+.git
+.gitignore
+
+# 2. Backend (Java/Spring 빌드 결과물 및 로그)
+**/target/
+**/build/
+*.jar
+*.war
+.gradle
+bin/
+
+# 3. Frontend (Node.js의 거대 파일들과 빌드 결과물)
+**/node_modules/
+**/dist/
+.npm
+.eslintcache
+
+# 4. IDE & Editor (개발 도구 설정 파일들)
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+
+# 5. OS Junk (OS에서 생성되는 불필요한 파일)
+.DS_Store
+Thumbs.db
+
+# 6. Secrets & Logs (보안 및 로그 파일 - 절대로 이미지에 포함되면 안 됨!)
+.env
+*.log
+docker-compose.yml
+docker-compose.override.yml
